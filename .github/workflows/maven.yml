@@ -2,43 +2,34 @@ name: Java CI/CD Pipeline to Tomcat
 
 on:
   push:
-    branches: [ main ]
-
-  workflow_dispatch:
+    branches: [ main ]   # Trigger on push to main branch
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up Java 17
+      # 2. Set up JDK
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
-          cache: maven
 
-      # 3. Build project using Maven
+      # 3. Build with Maven
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
-      # 4. Verify WAR file
-      - name: Verify WAR file
-        run: |
-          ls -lah target/*.war
-
-      # 5. Upload WAR artifact
+      # 4. Upload WAR as artifact (optional, for later jobs)
       - name: Upload WAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: myapp
           path: target/*.war
-          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
@@ -46,42 +37,17 @@ jobs:
     environment: production
 
     steps:
-      # 6. Download WAR artifact
+      # 5. Download WAR artifact
       - name: Download WAR artifact
         uses: actions/download-artifact@v4
         with:
           name: myapp
-          path: deployment
 
-      # 7. Deploy WAR to Tomcat
+      # 6. Deploy WAR via Tomcat Manager
       - name: Deploy to Tomcat
-        env:
-          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
-          TOMCAT_USER: ${{ secrets.TOMCAT_USER }}
-          TOMCAT_PASSWORD: ${{ secrets.TOMCAT_PASSWORD }}
         run: |
-          set -e
+          WAR_FILE=$(ls *.war)
+          echo "Deploying $WAR_FILE to Tomcat..."
+          curl -v --upload-file "$WAR_FILE" \
+            "http://${{ secrets.TOMCAT_USER }}:${{ secrets.TOMCAT_PASSWORD }}@${{ secrets.TOMCAT_HOST }}/manager/text/deploy?path=/myapp&update=true"
 
-          WAR_FILE=$(find deployment -maxdepth 2 -type f -name "*.war" -print -quit)
-
-          if [ -z "$WAR_FILE" ]; then
-            echo "ERROR: WAR file not found!"
-            exit 1
-          fi
-
-          if [ -z "$TOMCAT_HOST" ] || [ -z "$TOMCAT_USER" ] || [ -z "$TOMCAT_PASSWORD" ]; then
-            echo "ERROR: Tomcat GitHub Secrets are missing!"
-            exit 1
-          fi
-
-          echo "WAR file found: $(basename "$WAR_FILE")"
-          echo "Deploying application to Tomcat..."
-
-          curl --fail-with-body --show-error --silent \
-            --connect-timeout 15 \
-            --max-time 120 \
-            --user "$TOMCAT_USER:$TOMCAT_PASSWORD" \
-            --upload-file "$WAR_FILE" \
-            "http://${TOMCAT_HOST}/manager/text/deploy?path=/myapp&update=true"
-
-          echo "Deployment request completed successfully."
